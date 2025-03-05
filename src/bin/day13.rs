@@ -1,8 +1,9 @@
-use std::collections::HashMap;
-use adventofcode2019::build_main;
-use adventofcode2019::intcode::{Computer, Interaction};
-use adventofcode2019::points::Point2D;
 use crate::GameObject::{Ball, Block, Empty, HorizontalPaddle, Wall};
+use adventofcode2019::build_main_res;
+use adventofcode2019::computer::io::{InputProvider, OutputHandler};
+use adventofcode2019::computer::{IntcodeResult, Runnable, System};
+use adventofcode2019::points::Point2D;
+use std::collections::HashMap;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 enum GameObject {
@@ -28,74 +29,81 @@ impl GameObject {
 
 struct ArcadeCabinet {
     screen: HashMap<Point2D, GameObject>,
-    computer: Computer,
     score: isize,
     ball: Point2D,
-    paddle: Point2D
+    paddle: Point2D,
+    output_cache: Vec<isize>
 }
 
 impl ArcadeCabinet {
-    fn parse(input: &str) -> ArcadeCabinet {
-        let computer = Computer::parse(input, vec![]);
+    fn new() -> ArcadeCabinet {
         let screen = HashMap::new();
         let score = 0;
         let ball = Point2D(0, 0);
         let paddle = Point2D(0, 0);
-        ArcadeCabinet { screen, computer, score, ball, paddle }
+        let output_cache = Vec::with_capacity(3);
+        ArcadeCabinet { screen, score, ball, paddle, output_cache }
     }
+}
 
-    fn step(&mut self) -> Option<()> {
-        match self.computer.next_interaction()? {
-            Interaction::AwaitingInput => {
-                let dir = (self.ball.0 - self.paddle.0).signum();
-                self.computer.input(dir);
-            },
-            Interaction::CreatedOutput(x) => {
-                let y = self.computer.next_output()?;
+impl InputProvider for ArcadeCabinet {
+    fn get(&mut self) -> IntcodeResult<Option<isize>> {
+        Ok(Some((self.ball.0 - self.paddle.0).signum()))
+    }
+}
 
-                if (x, y) == (-1, 0) {
-                    self.score = self.computer.next_output()?;
-                }
-                else {
-                    let object_code = self.computer.next_output()?;
-                    let object = GameObject::from_id(object_code);
-                    let point = Point2D(x, y);
+impl OutputHandler for ArcadeCabinet {
+    fn push(&mut self, v: isize) -> IntcodeResult<()> {
+        self.output_cache.push(v);
 
-                    if object == Ball {
-                        self.ball = point;
-                    }
+        if self.output_cache.len() == 3 {
+            let x = self.output_cache[0];
+            let y = self.output_cache[1];
+            let z = self.output_cache[2];
 
-                    if object == HorizontalPaddle {
-                        self.paddle = point;
-                    }
-
-                    self.screen.insert(Point2D(x, y), object);
-                }
+            if (x, y) == (-1, 0) {
+                self.score = z;
             }
+            else {
+                let object = GameObject::from_id(z);
+                let point = Point2D(x, y);
+
+                if object == Ball {
+                    self.ball = point;
+                }
+
+                if object == HorizontalPaddle {
+                    self.paddle = point;
+                }
+
+                self.screen.insert(Point2D(x, y), object);
+            }
+
+            self.output_cache.clear();
         }
 
-        Some(())
-    }
-
-    fn run(&mut self) {
-        while let Some(_) = self.step() { continue; }
+        Ok(())
     }
 }
 
-fn part1(input: &str) -> usize {
-    let mut cabinet = ArcadeCabinet::parse(input);
-    cabinet.run();
+fn part1(input: &str) -> IntcodeResult<usize> {
+    let cabinet = ArcadeCabinet::new();
+    let mut system = System::parse(input, cabinet)?;
+    system.run()?;
 
-    cabinet.screen.values()
+    let result = system.io.screen.values()
         .filter(|&&v| v == Block)
-        .count()
+        .count();
+
+    Ok(result)
 }
 
-fn part2(input: &str) -> isize {
-    let mut cabinet = ArcadeCabinet::parse(input);
-    cabinet.computer.memory.set(0, 2);
-    cabinet.run();
-    cabinet.score
+fn part2(input: &str) -> IntcodeResult<isize> {
+    let cabinet = ArcadeCabinet::new();
+    let mut system = System::parse(input, cabinet)?;
+    system.cpu.memory.set(0, 2);
+    system.run()?;
+    Ok(system.io.score)
 }
 
-build_main!("day13.txt", "Part 1" => part1, "Part 2" => part2);
+build_main_res!("day13.txt", "Part 1" => part1, "Part 2" => part2);

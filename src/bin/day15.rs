@@ -1,9 +1,11 @@
-use std::collections::{HashMap, VecDeque};
-use adventofcode2019::build_main;
-use adventofcode2019::intcode::Computer;
-use adventofcode2019::points::{Direction2D, Point2D};
-use adventofcode2019::points::Direction2D::{Down, Left, Right, Up};
 use crate::Response::*;
+use adventofcode2019::computer::io::{InputProvider, OutputHandler};
+use adventofcode2019::computer::IntcodeError::LogicError;
+use adventofcode2019::computer::{IntcodeResult, Runnable, System};
+use adventofcode2019::points::Direction2D::{Down, Left, Right, Up};
+use adventofcode2019::points::{Direction2D, Point2D};
+use adventofcode2019::build_main_res;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 enum Response {
@@ -27,154 +29,148 @@ struct BFSResult {
     step_dir: Option<Direction2D>
 }
 
-struct Scene {
-    computer: Computer,
-    robot: Point2D,
+struct Robot {
+    position: Point2D,
     explored: HashMap<Point2D, Response>,
-    unexplored_via: Vec<(Point2D, Point2D, Direction2D)>,
-    oxygen_system: Option<Point2D>
+    oxygen_system: Option<Point2D>,
+    cur_path: VecDeque<Direction2D>,
+    cur_target: Option<Point2D>
 }
 
-impl Scene {
-    fn parse(input: &str) -> Scene {
-        let computer = Computer::parse(input, vec![]);
-        let robot = Point2D(0, 0);
+impl Robot {
+    fn new() -> Robot {
+        let position = Point2D(0, 0);
         let explored = HashMap::from([(Point2D(0, 0), Response::Open)]);
-        let unexplored_via = Vec::from([
-            (Point2D(-1, 0), Point2D(0, 0), Left),
-            (Point2D(1, 0), Point2D(0, 0), Right),
-            (Point2D(0, -1), Point2D(0, 0), Down),
-            (Point2D(0, 1), Point2D(0, 0), Up)
-        ]);
         let oxygen_system = None;
+        let cur_path = VecDeque::new();
+        let cur_target = None;
 
-        Scene { computer, robot, explored, unexplored_via, oxygen_system }
+        Robot { position, explored, oxygen_system, cur_path, cur_target }
     }
 
-    fn bfs_from(&self, from: Point2D, target: Option<Point2D>) -> HashMap<Point2D, BFSResult> {
+    fn bfs_until_unseen(&self, from: Point2D) -> (HashMap<Point2D, BFSResult>, Option<Point2D>) {
         let mut results = HashMap::new();
         results.insert(from, BFSResult { distance: 0, step_dir: None });
 
         let mut queue = VecDeque::new();
         queue.push_back((from, BFSResult { distance: 0, step_dir: None }));
 
+        let mut target = None;
+
         while let Some((point, result)) = queue.pop_front() {
-            for direction in [Up, Down, Left, Right] {
-                let neighbor = point + direction.to_step();
-                if results.contains_key(&neighbor) {
-                    continue;
-                }
-                let kind = self.explored.get(&neighbor);
-                if kind.is_none() || kind.is_some_and(|&k| k == Wall) {
+            for dir in [Up, Down, Left, Right] {
+                let neighbor = point + dir.to_step();
+
+                if results.contains_key(&neighbor) || self.explored.get(&neighbor) == Some(&Wall) {
                     continue;
                 }
 
-                let neighbor_result = BFSResult {
-                    distance: result.distance + 1,
-                    step_dir: Some(direction)
-                };
-                queue.push_back((neighbor, neighbor_result));
-                results.insert(neighbor, neighbor_result);
+                let r = BFSResult { distance: result.distance + 1, step_dir: Some(dir) };
+                results.insert(neighbor, r);
+                queue.push_back((neighbor, r));
 
-                if let Some(t) = target {
-                    if neighbor == t {
-                        break
-                    }
+                if !self.explored.contains_key(&neighbor) {
+                    target = Some(neighbor);
+                    break;
                 }
+            }
+
+            if !target.is_none() {
+                break;
             }
         }
 
-        results
+        (results, target)
     }
 
-    fn path_to(&mut self, target: Point2D) -> Option<Vec<Direction2D>> {
-        if target == self.robot { return Some(Vec::new()); }
+    fn distance(&mut self, from: Point2D, to: Point2D) -> Option<usize> {
+        let (bfs, _) = self.bfs_until_unseen(from);
+        let r = bfs.get(&to)?;
+        Some(r.distance)
+    }
+}
 
-        let bfs = self.bfs_from(self.robot, Some(target));
+impl InputProvider for Robot {
+    fn get(&mut self) -> IntcodeResult<Option<isize>> {
+        if self.cur_path.is_empty() {
+            let (bfs, target) = self.bfs_until_unseen(self.position);
 
-        let mut point = target;
-        let mut result = Vec::new();
+            if let Some(t) = target {
+                let mut path = Vec::new();
+                let mut point = t;
 
-        while let Some(&BFSResult { step_dir: Some(dir), .. }) = bfs.get(&point) {
-            result.push(dir);
-            point -= dir.to_step();
+                while let Some(&BFSResult { step_dir: Some(dir), ..}) = bfs.get(&point) {
+                    path.push(dir);
+                    point -= dir.to_step();
+                }
+
+                path.reverse();
+                self.cur_path.extend(path);
+            }
         }
 
-        if result.is_empty() {
-            None
+        if let Some(dir) = self.cur_path.pop_front() {
+            self.cur_target = Some(self.position + dir.to_step());
+            Ok(Some(dir_code(dir)))
         }
         else {
-            result.reverse();
-            Some(result)
+            Ok(None)
         }
-    }
-
-    fn step(&mut self) -> Option<(Point2D, Response)> {
-        let (target, via, target_dir) = self.unexplored_via.pop()?;
-
-        for dir in self.path_to(via)? {
-            self.computer.input(dir_code(dir));
-            self.computer.next_output().expect("a direction");
-            self.robot += dir.to_step();
-        }
-
-        assert_eq!(self.robot, via);
-
-        self.computer.input(dir_code(target_dir));
-        match self.computer.next_output()? {
-            0 => {
-                self.explored.insert(target, Response::Wall);
-                Some((target, Response::Wall))
-            },
-            1 => {
-                self.explored.insert(target, Open);
-                self.robot = target;
-                for d in [Up, Down, Left, Right] {
-                    let neighbor = d.to_step() + self.robot;
-                    if !self.explored.contains_key(&neighbor) {
-                        self.unexplored_via.push((neighbor, self.robot, d));
-                    }
-                }
-                Some((target, Open))
-            },
-            2 => {
-                self.oxygen_system = Some(target);
-                self.explored.insert(target, OxygenSystem);
-                self.robot = target;
-                Some((target, OxygenSystem))
-            },
-            _ => panic!()
-        }
-    }
-
-    fn explore(&mut self) {
-        while let Some(_) = self.step() { }
-        assert!(self.unexplored_via.is_empty());
-    }
-
-    fn distance(&self, from: Point2D, to: Point2D) -> usize {
-        let results = self.bfs_from(from, Some(to));
-        results[&to].distance
     }
 }
 
-fn part1(input: &str) -> usize {
-    let mut scene = Scene::parse(input);
-    scene.explore();
-    let o2 = scene.oxygen_system.expect("oxygen system");
-    scene.distance(Point2D(0, 0), o2)
+impl OutputHandler for Robot {
+    fn push(&mut self, v: isize) -> IntcodeResult<()> {
+
+        let msg = "Shouldn't get output without a target...".to_string();
+        let target = self.cur_target.ok_or(LogicError(msg))?;
+
+        let response = match v {
+            0 => Wall,
+            1 => Open,
+            2 => OxygenSystem,
+            _ => return Err(LogicError("bad output from program".to_string()))
+        };
+
+        self.explored.insert(target, response);
+
+        if response != Wall {
+            self.position = target;
+        }
+
+        if response == OxygenSystem {
+            self.oxygen_system = Some(target);
+        }
+
+        Ok(())
+    }
 }
 
-fn part2(input: &str) -> usize {
-    let mut scene = Scene::parse(input);
-    scene.explore();
-    let o2 = scene.oxygen_system.expect("oxygen system");
+fn part1(input: &str) -> IntcodeResult<usize> {
+    let mut system = System::parse(input, Robot::new())?;
+    system.run()?;
 
-    let bfs = scene.bfs_from(o2, None);
-    bfs.into_values()
+    let o2 = system.io.oxygen_system.ok_or(LogicError("Didn't find O2 system".to_string()))?;
+    system.io
+        .distance(Point2D(0, 0), o2)
+        .ok_or(LogicError("Didn't find a path from (0, 0) to O2".to_string()))
+}
+
+fn part2(input: &str) -> IntcodeResult<usize> {
+    let mut system = System::parse(input, Robot::new())?;
+    system.run()?;
+
+    let o2 = system.io.oxygen_system.ok_or(LogicError("Didn't find O2 system".to_string()))?;
+
+    let (bfs, target) = system.io.bfs_until_unseen(o2);
+    assert!(target.is_none());
+
+    let result = bfs.into_values()
         .map(|r| r.distance)
         .max()
-        .unwrap()
+        .unwrap();
+
+    Ok(result)
 }
 
-build_main!("day15.txt", "Part 1" => part1, "Part 2" => part2);
+build_main_res!("day15.txt", "Part 1" => part1, "Part 2" => part2);

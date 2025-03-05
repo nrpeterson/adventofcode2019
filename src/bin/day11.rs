@@ -1,68 +1,77 @@
-use std::cmp::{max, min};
-use std::collections::HashMap;
-use itertools::{chain, Itertools};
-use adventofcode2019::build_main;
-use adventofcode2019::intcode::Computer;
+use adventofcode2019::computer::{IntcodeResult, Runnable, System};
 use adventofcode2019::points::Point2D;
+use adventofcode2019::build_main_res;
+use itertools::{chain, Itertools};
+use std::cmp::{max, min};
+use std::collections::HashSet;
+use adventofcode2019::computer::io::{InputProvider, OutputHandler};
 
 struct Robot {
     position: Point2D,
     direction: Point2D,
-    computer: Computer
+    is_white: HashSet<Point2D>,
+    visited: HashSet<Point2D>,
+    awaiting_color: bool
 }
 
 impl Robot {
-    fn parse(input: &str) -> Robot {
-        let computer = Computer::parse(input, vec![]);
+    fn new() -> Robot {
         let position = Point2D(0, 0);
         let direction = Point2D(0, 1);
-        Robot { position, direction, computer }
+        let is_white = HashSet::new();
+        let visited = HashSet::from([position]);
+        let awaiting_color = true;
+        Robot { position, direction, is_white, visited, awaiting_color }
     }
 }
 
-struct Scene {
-    colors: HashMap<Point2D, isize>,
-    robot: Robot
-}
-
-impl Scene {
-    fn parse(input: &str) -> Scene {
-        let colors = HashMap::new();
-        let robot = Robot::parse(input);
-        Scene { colors, robot }
+impl InputProvider for Robot {
+    fn get(&mut self) -> IntcodeResult<Option<isize>> {
+        let result = match self.is_white.contains(&self.position) {
+            true => 1,
+            false => 0
+        };
+        Ok(Some(result))
     }
 }
 
-impl Iterator for Scene {
-    type Item = Point2D;
-    fn next(&mut self) -> Option<Self::Item> {
-        let cur_position = self.robot.position;
-        let cur_color = self.colors.entry(self.robot.position).or_insert(0);
-        self.robot.computer.input(*cur_color);
-        *cur_color = self.robot.computer.next_output()?;
-
-        let turn = self.robot.computer.next_output()?;
-        let Point2D(x, y) = self.robot.direction;
-        self.robot.direction = if turn == 0 { Point2D(-y, x) }
-            else { Point2D(y, -x) };
-
-        self.robot.position = self.robot.position + self.robot.direction;
-
-        Some(cur_position)
+impl OutputHandler for Robot {
+    fn push(&mut self, v: isize) -> IntcodeResult<()> {
+        if self.awaiting_color {
+            if v == 1 {
+                self.is_white.insert(self.position);
+            }
+            else {
+                self.is_white.remove(&self.position);
+            }
+            self.awaiting_color = false;
+            Ok(())
+        }
+        else {
+            let Point2D(x, y) = self.direction;
+            self.direction = if v == 0 { Point2D(-y, x) } else { Point2D(y, -x) };
+            self.position = self.position + self.direction;
+            self.visited.insert(self.position);
+            self.awaiting_color = true;
+            Ok(())
+        }
     }
 }
 
-fn part1(input: &str) -> usize {
-    let scene = Scene::parse(input);
-    scene.unique().count()
+fn part1(input: &str) -> IntcodeResult<usize> {
+    let mut system = System::parse(input, Robot::new())?;
+    system.run()?;
+    Ok(system.io.visited.len())
 }
 
-fn part2(input: &str) -> String {
-    let mut scene = Scene::parse(input);
-    scene.colors.insert(Point2D(0, 0), 1);
+fn part2(input: &str) -> IntcodeResult<String> {
+    let mut robot = Robot::new();
+    robot.is_white.insert(Point2D(0, 0));
+    let mut system = System::parse(input, robot)?;
 
-    while let Some(_) = scene.next() { };
-    let (x_min, x_max, y_min, y_max) = scene.colors.keys()
+    system.run()?;
+
+    let (x_min, x_max, y_min, y_max) = system.io.is_white.iter()
         .fold((isize::MAX, isize::MIN, isize::MAX, isize::MIN),
               |(x0, x1, y0, y1), &Point2D(x, y)| {
                   (min(x0, x), max(x1, x), min(y0, y), max(y1, y))
@@ -74,16 +83,17 @@ fn part2(input: &str) -> String {
         (y_max - y_min + 1) as usize
     ];
 
-    for (Point2D(x, y), color) in scene.colors {
+    for &Point2D(x, y) in system.io.is_white.iter() {
         let i = (y_max - y) as usize;
         let j = (x - x_min) as usize;
-        let c = if color == 0 { '.' } else { '#' };
-        message[i][j] = c;
+        message[i][j] = '#';
     }
 
-    chain!(std::iter::once(vec![]), message.into_iter())
+    let msg = chain!(std::iter::once(vec![]), message.into_iter())
         .map(|row| row.into_iter().collect::<String>())
-        .join("\n")
+        .join("\n");
+
+    Ok(msg)
 }
 
-build_main!("day11.txt", "Part 1" => part1, "Part 2" => part2);
+build_main_res!("day11.txt", "Part 1" => part1, "Part 2" => part2);

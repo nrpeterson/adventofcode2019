@@ -1,7 +1,9 @@
-use adventofcode2019::build_main;
+use adventofcode2019::computer::io::{Bus, Last, OutputHandler};
+use adventofcode2019::computer::IntcodeError::{ExpectedOutput, LogicError};
+use adventofcode2019::computer::{IntcodeResult, Runnable, System};
 use adventofcode2019::grid::Direction::{Down, Left, Right, Up};
 use adventofcode2019::grid::{Direction, Position};
-use adventofcode2019::intcode::Computer;
+use adventofcode2019::build_main_res;
 use itertools::{chain, Itertools};
 use std::cmp::min;
 use std::collections::{HashSet, VecDeque};
@@ -11,6 +13,69 @@ struct Scene {
     scaffolds: HashSet<Position>,
     robot_pos: Position,
     robot_dir: Direction
+}
+
+struct SceneBuilder {
+    i: usize,
+    j: usize,
+    scaffolds: HashSet<Position>,
+    robot_pos: Option<Position>,
+    robot_dir: Option<Direction>
+}
+
+impl SceneBuilder {
+    fn new() -> SceneBuilder {
+        SceneBuilder {
+            i: 0,
+            j: 0,
+            scaffolds: HashSet::new(),
+            robot_pos: None,
+            robot_dir: None
+        }
+    }
+
+    fn build(self) -> IntcodeResult<Scene> {
+        let robot_pos = self.robot_pos
+            .ok_or(LogicError("Expected robot position".to_string()))?;
+
+        let robot_dir = self.robot_dir
+            .ok_or(LogicError("Expected robot direction".to_string()))?;
+
+        Ok(Scene { scaffolds: self.scaffolds, robot_pos, robot_dir })
+    }
+}
+
+impl OutputHandler for SceneBuilder {
+    fn push(&mut self, v: isize) -> IntcodeResult<()> {
+        let c = (v as u8) as char;
+        match c {
+            '#' | '^' | '>' | 'v' | '<' =>  { self.scaffolds.insert(Position(self.i, self.j)); },
+            _ => ()
+        }
+
+        match c {
+            '^' | '>' | 'v' | '<' => { self.robot_pos = Some(Position(self.i, self.j)); },
+            _ => ()
+        }
+
+        match c {
+            '^' => { self.robot_dir = Some(Up); },
+            '>' => { self.robot_dir = Some(Right); },
+            'v' => { self.robot_dir = Some(Down); },
+            '<' => { self.robot_dir = Some(Left); }
+            _ => ()
+        }
+
+        if c == '\n' {
+            self.i += 1;
+            self.j = 0;
+        }
+        else {
+            self.j += 1;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -29,43 +94,6 @@ struct State {
 }
 
 impl Scene {
-    fn new(camera_output: Vec<isize>) -> Scene {
-        let s = camera_output.into_iter()
-            .map(|i| (i as u8) as char)
-            .collect::<String>();
-
-        let mut scaffolds = HashSet::new();
-        let mut robot_pos_opt = None;
-        let mut robot_dir_opt = None;
-
-        for (i, line) in s.lines().enumerate() {
-            for (j, c) in line.chars().enumerate() {
-                match c {
-                    '#' | '^' | '>' | 'v' | '<' =>  { scaffolds.insert(Position(i, j)); },
-                    _ => ()
-                }
-
-                match c {
-                    '^' | '>' | 'v' | '<' => { robot_pos_opt = Some(Position(i, j)); },
-                    _ => ()
-                }
-
-                match c {
-                    '^' => { robot_dir_opt = Some(Up); },
-                    '>' => { robot_dir_opt = Some(Right); },
-                    'v' => { robot_dir_opt = Some(Down); },
-                    '<' => { robot_dir_opt = Some(Left); }
-                    _ => ()
-                }
-            }
-        }
-
-        let robot_pos = robot_pos_opt.unwrap();
-        let robot_dir = robot_dir_opt.unwrap();
-
-        Scene { scaffolds, robot_pos, robot_dir }
-    }
-
     fn neighbors(&self, &Position(i, j): &Position) -> Vec<Position> {
         let mut result = vec![];
 
@@ -207,57 +235,63 @@ impl Scene {
     }
 }
 
-fn part1(input: &str) -> usize {
-    let computer = Computer::parse(input, vec![]);
-    let output = computer.output_runner().collect_vec();
-    let scene = Scene::new(output);
+fn part1(input: &str) -> IntcodeResult<usize> {
+    let io = Bus { input: (), output: SceneBuilder::new() };
+    let mut system = System::parse(input, io)?;
+    system.run()?;
+    let scene = system.io.output.build()?;
 
     let intersections = scene.intersections();
 
-    intersections.into_iter()
+    let result = intersections.into_iter()
         .map(|Position(i, j)| i * j)
-        .sum::<usize>()
+        .sum::<usize>();
+
+    Ok(result)
 }
 
-#[allow(unstable_name_collisions)]
-fn part2(input: &str) -> isize {
-    let computer = Computer::parse(input, vec![]);
-    let output = computer.output_runner().collect_vec();
-    let scene = Scene::new(output);
+fn part2(input: &str) -> IntcodeResult<isize> {
+    let io = Bus { input: (), output: SceneBuilder::new() };
+    let mut system = System::parse(input, io)?;
+    system.run()?;
+    let scene = system.io.output.build()?;
 
     let programs = scene.programs();
 
-    let mut input_chars = vec![];
-    programs.program.iter().cloned().intersperse(',').for_each(|c| input_chars.push(c));
-    input_chars.push('\n');
+    let mut input_chars = VecDeque::new();
+    Itertools::intersperse(programs.program.iter().cloned(), ',')
+        .for_each(|c| input_chars.push_back(c));
+
+    input_chars.push_back('\n');
     for prog in [&programs.a, &programs.b, &programs.c] {
-        let s = prog.as_ref().unwrap().iter()
+        let s = Itertools::intersperse(
+            prog.as_ref().unwrap().iter()
             .map(|&cmd| {
                 match cmd {
                     Command::TurnLeft => "L".to_owned(),
                     Command::TurnRight => "R".to_owned(),
                     Command::Forward(n) => n.to_string()
                 }
-            })
-            .intersperse(",".to_owned())
-            .collect::<String>();
+            }),
+            ",".to_string()
+        ).collect::<String>();
 
         input_chars.extend(s.chars());
-        input_chars.push('\n');
+        input_chars.push_back('\n');
     }
 
-    input_chars.push('n');
-    input_chars.push('\n');
+    input_chars.push_back('n');
+    input_chars.push_back('\n');
 
-    let inputs = input_chars.into_iter()
-        .map(|c| c as isize)
-        .collect_vec();
+    let output = Last(None);
 
-    let mut computer2 = Computer::parse(input, inputs);
-    computer2.memory.set(0, 2);
+    let io2 = Bus { input: input_chars, output };
 
-    let output = computer2.output_runner().collect_vec();
-    *output.last().unwrap()
+    let mut system2 = System::parse(input, io2)?;
+    system2.cpu.memory.set(0, 2);
+    system2.run()?;
+
+    system2.io.output.0.ok_or(ExpectedOutput)
 }
 
-build_main!("day17.txt", "Part 1" => part1, "Part 2" => part2);
+build_main_res!("day17.txt", "Part 1" => part1, "Part 2" => part2);
