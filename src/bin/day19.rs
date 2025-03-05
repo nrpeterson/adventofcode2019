@@ -1,5 +1,5 @@
-use adventofcode2019::computer::io::IOQueues;
-use adventofcode2019::computer::{IntcodeResult, Resettable, Runnable, System};
+use adventofcode2019::intcode::io::IOQueues;
+use adventofcode2019::intcode::{IntcodeResult, Resettable, Runnable, System};
 use adventofcode2019::build_main_res;
 use itertools::Itertools;
 

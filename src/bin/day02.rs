@@ -1,7 +1,7 @@
 use adventofcode2019::build_main_res;
-use adventofcode2019::computer::{IntcodeResult, Resettable};
-use adventofcode2019::computer::cpu::{parse_code, CPU};
-use adventofcode2019::computer::IntcodeError::LogicError;
+use adventofcode2019::intcode::{IntcodeResult, Resettable};
+use adventofcode2019::intcode::cpu::{parse_code, CPU};
+use adventofcode2019::intcode::IntcodeError::LogicError;
 
 fn part1(input: &str) -> IntcodeResult<isize> {
     let program = parse_code(input)?;

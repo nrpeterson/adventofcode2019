@@ -1,9 +1,9 @@
 use adventofcode2019::build_main_res;
-use adventofcode2019::computer::cpu::parse_code;
-use adventofcode2019::computer::io::IOQueues;
-use adventofcode2019::computer::IntcodeError::LogicError;
-use adventofcode2019::computer::State::Halted;
-use adventofcode2019::computer::{IntcodeResult, Runnable, State, System};
+use adventofcode2019::intcode::cpu::parse_code;
+use adventofcode2019::intcode::io::IOQueues;
+use adventofcode2019::intcode::IntcodeError::LogicError;
+use adventofcode2019::intcode::State::Halted;
+use adventofcode2019::intcode::{IntcodeResult, Runnable, State, System};
 use itertools::Itertools;
 
 fn part1(input: &str) -> IntcodeResult<isize> {
@@ -20,7 +20,7 @@ fn part1(input: &str) -> IntcodeResult<isize> {
 
         for i in 0..4 {
             systems[i].run_until_output()?;
-            let msg = format!("Expected an output for computer {i}");
+            let msg = format!("Expected an output for intcode {i}");
             let output = systems[i].io.output
                 .pop_front()
                 .ok_or(LogicError(msg))?;

@@ -1,7 +1,7 @@
-use crate::computer::cpu::Instruction::*;
-use crate::computer::IntcodeError::{LogicError, ParsingFailure, WriteToImmediate};
-use crate::computer::State::{AwaitingInput, Continue, Halted, OutputGenerated};
-use crate::computer::{IntcodeError, IntcodeResult, Resettable, Runnable, State};
+use crate::intcode::cpu::Instruction::*;
+use crate::intcode::IntcodeError::{LogicError, ParsingFailure, WriteToImmediate};
+use crate::intcode::State::{AwaitingInput, Continue, Halted, OutputGenerated};
+use crate::intcode::{IntcodeError, IntcodeResult, Resettable, Runnable, State};
 use std::collections::VecDeque;
 
 pub fn parse_code(code: &str) -> IntcodeResult<Vec<isize>> {

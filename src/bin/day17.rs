@@ -1,6 +1,6 @@
-use adventofcode2019::computer::io::{Bus, Last, OutputHandler};
-use adventofcode2019::computer::IntcodeError::{ExpectedOutput, LogicError};
-use adventofcode2019::computer::{IntcodeResult, Runnable, System};
+use adventofcode2019::intcode::io::{Bus, Last, OutputHandler};
+use adventofcode2019::intcode::IntcodeError::{ExpectedOutput, LogicError};
+use adventofcode2019::intcode::{IntcodeResult, Runnable, System};
 use adventofcode2019::grid::Direction::{Down, Left, Right, Up};
 use adventofcode2019::grid::{Direction, Position};
 use adventofcode2019::build_main_res;

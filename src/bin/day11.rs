@@ -1,10 +1,10 @@
-use adventofcode2019::computer::{IntcodeResult, Runnable, System};
+use adventofcode2019::intcode::{IntcodeResult, Runnable, System};
 use adventofcode2019::points::Point2D;
 use adventofcode2019::build_main_res;
 use itertools::{chain, Itertools};
 use std::cmp::{max, min};
 use std::collections::HashSet;
-use adventofcode2019::computer::io::{InputProvider, OutputHandler};
+use adventofcode2019::intcode::io::{InputProvider, OutputHandler};
 
 struct Robot {
     position: Point2D,

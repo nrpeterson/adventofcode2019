@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
-use crate::computer::IntcodeError::LogicError;
-use crate::computer::{IntcodeResult, Resettable};
+use crate::intcode::IntcodeError::LogicError;
+use crate::intcode::{IntcodeResult, Resettable};
 
 pub trait InputProvider {
     fn get(&mut self) -> IntcodeResult<Option<isize>>;

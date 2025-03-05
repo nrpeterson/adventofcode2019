@@ -1,7 +1,7 @@
 use crate::GameObject::{Ball, Block, Empty, HorizontalPaddle, Wall};
 use adventofcode2019::build_main_res;
-use adventofcode2019::computer::io::{InputProvider, OutputHandler};
-use adventofcode2019::computer::{IntcodeResult, Runnable, System};
+use adventofcode2019::intcode::io::{InputProvider, OutputHandler};
+use adventofcode2019::intcode::{IntcodeResult, Runnable, System};
 use adventofcode2019::points::Point2D;
 use std::collections::HashMap;
 

@@ -1,7 +1,7 @@
 use adventofcode2019::build_main_res;
-use adventofcode2019::computer::{IntcodeResult, Runnable, System};
+use adventofcode2019::intcode::{IntcodeResult, Runnable, System};
 use std::collections::VecDeque;
-use adventofcode2019::computer::io::{Bus, Const};
+use adventofcode2019::intcode::io::{Bus, Const};
 
 fn part1(input: &str) -> IntcodeResult<isize> {
     let io = Bus { input: Const(1), output: VecDeque::new() };

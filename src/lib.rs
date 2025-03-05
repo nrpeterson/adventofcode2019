@@ -1,9 +1,8 @@
-pub mod intcode;
 pub mod parsers;
 pub mod points;
 pub mod math;
 pub mod grid;
-pub mod computer;
+pub mod intcode;
 
 #[macro_export]
 macro_rules! build_main {
