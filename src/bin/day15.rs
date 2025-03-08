@@ -1,10 +1,12 @@
 use crate::Response::*;
-use adventofcode2019::intcode::io::{InputProvider, OutputHandler};
+use adventofcode2019::build_main_res;
+use adventofcode2019::intcode::cpu::CPU;
+use adventofcode2019::intcode::io::{IProvider, OProvider};
 use adventofcode2019::intcode::IntcodeError::LogicError;
-use adventofcode2019::intcode::{IntcodeResult, Runnable, System};
+use adventofcode2019::intcode::IntcodeState::{AwaitingInput, Continue};
+use adventofcode2019::intcode::{IntcodeResult, IntcodeState, Runnable};
 use adventofcode2019::points::Direction2D::{Down, Left, Right, Up};
 use adventofcode2019::points::{Direction2D, Point2D};
-use adventofcode2019::build_main_res;
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -90,8 +92,11 @@ impl Robot {
     }
 }
 
-impl InputProvider for Robot {
-    fn get(&mut self) -> IntcodeResult<Option<isize>> {
+impl IProvider for Robot {
+    type PInput = isize;
+    type RInput = ();
+
+    fn provide_input<O>(&mut self) -> IntcodeResult<(IntcodeState<O>, Option<Self::PInput>)> {
         if self.cur_path.is_empty() {
             let (bfs, target) = self.bfs_until_unseen(self.position);
 
@@ -111,21 +116,27 @@ impl InputProvider for Robot {
 
         if let Some(dir) = self.cur_path.pop_front() {
             self.cur_target = Some(self.position + dir.to_step());
-            Ok(Some(dir_code(dir)))
+            Ok((Continue, Some(dir_code(dir))))
         }
         else {
-            Ok(None)
+            Ok((AwaitingInput, None))
         }
+    }
+
+    fn receive_input(&mut self, _: Self::RInput) -> IntcodeResult<()> {
+        Err(LogicError("Should not be asked for input...".to_string()))
     }
 }
 
-impl OutputHandler for Robot {
-    fn push(&mut self, v: isize) -> IntcodeResult<()> {
+impl OProvider for Robot {
+    type POutput = ();
+    type ROutput = isize;
 
+    fn handle_output(&mut self, output: Self::ROutput) -> IntcodeResult<IntcodeState<Self::POutput>> {
         let msg = "Shouldn't get output without a target...".to_string();
         let target = self.cur_target.ok_or(LogicError(msg))?;
 
-        let response = match v {
+        let response = match output {
             0 => Wall,
             1 => Open,
             2 => OxygenSystem,
@@ -142,27 +153,31 @@ impl OutputHandler for Robot {
             self.oxygen_system = Some(target);
         }
 
-        Ok(())
+        Ok(Continue)
     }
 }
 
 fn part1(input: &str) -> IntcodeResult<usize> {
-    let mut system = System::parse(input, Robot::new())?;
+    let cpu = CPU::parse(input)?;
+    let robot = Robot::new();
+    let mut system = cpu.wrap(robot);
     system.run()?;
 
-    let o2 = system.io.oxygen_system.ok_or(LogicError("Didn't find O2 system".to_string()))?;
-    system.io
+    let o2 = system.outer.oxygen_system.ok_or(LogicError("Didn't find O2 system".to_string()))?;
+    system.outer
         .distance(Point2D(0, 0), o2)
         .ok_or(LogicError("Didn't find a path from (0, 0) to O2".to_string()))
 }
 
 fn part2(input: &str) -> IntcodeResult<usize> {
-    let mut system = System::parse(input, Robot::new())?;
+    let cpu = CPU::parse(input)?;
+    let robot = Robot::new();
+    let mut system = cpu.wrap(robot);
     system.run()?;
 
-    let o2 = system.io.oxygen_system.ok_or(LogicError("Didn't find O2 system".to_string()))?;
+    let o2 = system.outer.oxygen_system.ok_or(LogicError("Didn't find O2 system".to_string()))?;
 
-    let (bfs, target) = system.io.bfs_until_unseen(o2);
+    let (bfs, target) = system.outer.bfs_until_unseen(o2);
     assert!(target.is_none());
 
     let result = bfs.into_values()

@@ -1,45 +1,59 @@
+use crate::intcode::IntcodeState::{AwaitingInput, Continue, OutputGenerated};
+use crate::intcode::{IntcodeResult, IntcodeState, Resettable};
 use std::collections::VecDeque;
 use crate::intcode::IntcodeError::LogicError;
-use crate::intcode::{IntcodeResult, Resettable};
 
-pub trait InputProvider {
-    fn get(&mut self) -> IntcodeResult<Option<isize>>;
+pub trait IProvider {
+    type PInput;
+    type RInput;
+
+    fn provide_input<O>(&mut self) -> IntcodeResult<(IntcodeState<O>, Option<Self::PInput>)>;
+
+    fn receive_input(&mut self, input: Self::RInput) -> IntcodeResult<()>;
 }
 
-pub trait OutputHandler {
-    fn push(&mut self, v: isize) -> IntcodeResult<()>;
+pub trait OProvider {
+    type POutput;
+    type ROutput;
+
+    fn handle_output(&mut self, output: Self::ROutput) -> IntcodeResult<IntcodeState<Self::POutput>>;
 }
 
-pub trait IOProvider: InputProvider + OutputHandler { }
+pub struct Bus<I, O> { pub input: I, pub output: O }
 
-impl<T: InputProvider + OutputHandler> IOProvider for T { }
+impl<IP: IProvider, OP> IProvider for Bus<IP, OP> {
+    type PInput = IP::PInput;
+    type RInput = IP::RInput;
 
-pub struct Bus<I: InputProvider, O: OutputHandler> {
-    pub input: I,
-    pub output: O
-}
+    fn provide_input<O>(&mut self) -> IntcodeResult<(IntcodeState<O>, Option<Self::PInput>)> {
+        self.input.provide_input()
+    }
 
-impl<I: InputProvider, O: OutputHandler> InputProvider for Bus<I, O> {
-    fn get(&mut self) -> IntcodeResult<Option<isize>> {
-        self.input.get()
+    fn receive_input(&mut self, input: Self::RInput) -> IntcodeResult<()> {
+        self.input.receive_input(input)
     }
 }
 
-impl<I: InputProvider, O: OutputHandler> OutputHandler for Bus<I, O> {
-    fn push(&mut self, v: isize) -> IntcodeResult<()> {
-        self.output.push(v)
+impl<IP, OP: OProvider> OProvider for Bus<IP, OP> {
+    type POutput = OP::POutput;
+    type ROutput = OP::ROutput;
+
+    fn handle_output(&mut self, output: Self::ROutput) -> IntcodeResult<IntcodeState<Self::POutput>> {
+        self.output.handle_output(output)
     }
 }
 
-impl<I, O> Resettable for Bus<I, O>
-where I: InputProvider + Resettable, O: OutputHandler + Resettable {
+impl<IP: Resettable, OP: Resettable> Resettable for Bus<IP, OP> {
     fn reset(&mut self) {
         self.input.reset();
         self.output.reset();
     }
 }
 
-pub struct IOQueues { pub input: VecDeque<isize>, pub output: VecDeque<isize> }
+pub struct IOQueues {
+    pub input: VecDeque<isize>,
+    pub output: VecDeque<isize>
+}
 
 impl IOQueues {
     pub fn new() -> IOQueues {
@@ -47,15 +61,30 @@ impl IOQueues {
     }
 }
 
-impl InputProvider for IOQueues {
-    fn get(&mut self) -> IntcodeResult<Option<isize>> {
-        Ok(self.input.pop_front())
+impl IProvider for IOQueues {
+    type PInput = isize;
+    type RInput = isize;
+
+    fn provide_input<O>(&mut self) -> IntcodeResult<(IntcodeState<O>, Option<isize>)> {
+        match self.input.pop_front() {
+            s if s.is_some() => Ok((Continue, s)),
+            _ => Ok((AwaitingInput, None))
+        }
+    }
+
+    fn receive_input(&mut self, input: Self::RInput) -> IntcodeResult<()> {
+        self.input.push_back(input);
+        Ok(())
     }
 }
 
-impl OutputHandler for IOQueues {
-    fn push(&mut self, v: isize) -> IntcodeResult<()> {
-        Ok(self.output.push_back(v))
+impl OProvider for IOQueues {
+    type POutput = isize;
+    type ROutput = isize;
+
+    fn handle_output(&mut self, output: isize) -> IntcodeResult<IntcodeState<isize>> {
+        self.output.push_back(output);
+        Ok(OutputGenerated(output))
     }
 }
 
@@ -66,64 +95,80 @@ impl Resettable for IOQueues {
     }
 }
 
-impl InputProvider for () {
-    fn get(&mut self) -> IntcodeResult<Option<isize>> {
-        Err(LogicError("Asked for input with no input peripheral".to_string()))
+pub struct ConstInput<T>(pub T);
+
+impl<T: Clone> IProvider for ConstInput<T> {
+    type PInput = T;
+    type RInput = ();
+
+    fn provide_input<O>(&mut self) -> IntcodeResult<(IntcodeState<O>, Option<T>)> {
+        Ok((Continue, Some(self.0.clone())))
+    }
+
+    fn receive_input(&mut self, _: Self::RInput) -> IntcodeResult<()> {
+        Err(LogicError("Does not accept input".to_string()))
     }
 }
 
-impl Resettable for () {
-    fn reset(&mut self) {
-        ()
+pub struct Last<T>(pub Option<T>);
+
+impl<T> OProvider for Last<T> {
+    type POutput = ();
+    type ROutput = T;
+
+    fn handle_output(&mut self, output: T) -> IntcodeResult<IntcodeState<()>> {
+        self.0 = Some(output);
+        Ok(Continue)
     }
 }
 
-impl InputProvider for VecDeque<isize> {
-    fn get(&mut self) -> IntcodeResult<Option<isize>> {
-        Ok(self.pop_front())
+impl IProvider for VecDeque<isize> {
+    type PInput = isize;
+    type RInput = isize;
+
+    fn provide_input<O>(&mut self) -> IntcodeResult<(IntcodeState<O>, Option<Self::PInput>)> {
+        let result = self.pop_front();
+        let state = if result.is_some() { Continue } else { AwaitingInput };
+        Ok((state, result))
+    }
+
+    fn receive_input(&mut self, input: Self::RInput) -> IntcodeResult<()> {
+        self.push_back(input);
+        Ok(())
     }
 }
 
-impl OutputHandler for VecDeque<isize> {
-    fn push(&mut self, value: isize) -> IntcodeResult<()> {
-        Ok(self.push_back(value))
+impl OProvider for VecDeque<isize> {
+    type POutput = ();
+    type ROutput = isize;
+
+    fn handle_output(&mut self, output: isize) -> IntcodeResult<IntcodeState<()>> {
+        self.push_back(output);
+        Ok(Continue)
     }
 }
 
-impl InputProvider for VecDeque<char> {
-    fn get(&mut self) -> IntcodeResult<Option<isize>> {
+impl IProvider for VecDeque<char> {
+    type PInput = isize;
+    type RInput = char;
+
+    fn provide_input<O>(&mut self) -> IntcodeResult<(IntcodeState<O>, Option<isize>)> {
         let result = self.pop_front()
             .map(|c| c as isize);
 
-        Ok(result)
-    }
-}
+        let state = if result.is_some() { Continue } else { AwaitingInput };
 
-impl OutputHandler for VecDeque<char> {
-    fn push(&mut self, value: isize) -> IntcodeResult<()> {
-        self.push_back((value as u8) as char);
+        Ok((state, result))
+    }
+
+    fn receive_input(&mut self, input: char) -> IntcodeResult<()> {
+        self.push_back(input);
         Ok(())
     }
 }
 
-pub struct Const(pub isize);
-
-impl InputProvider for Const {
-    fn get(&mut self) -> IntcodeResult<Option<isize>> {
-        Ok(Some(self.0))
-    }
-}
-
-impl Resettable for Const {
-    fn reset(&mut self) { () }
-}
-
-pub struct Last(pub Option<isize>);
-
-impl OutputHandler for Last {
-    fn push(&mut self, v: isize) -> IntcodeResult<()> {
-        self.0 = Some(v);
-
-        Ok(())
+impl<T> Resettable for VecDeque<T> {
+    fn reset(&mut self) {
+        self.clear()
     }
 }

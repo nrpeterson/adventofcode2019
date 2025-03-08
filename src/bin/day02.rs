@@ -1,5 +1,5 @@
 use adventofcode2019::build_main_res;
-use adventofcode2019::intcode::{IntcodeResult, Resettable};
+use adventofcode2019::intcode::{IntcodeResult, Resettable, Runnable};
 use adventofcode2019::intcode::cpu::{parse_code, CPU};
 use adventofcode2019::intcode::IntcodeError::LogicError;
 

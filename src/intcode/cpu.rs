@@ -1,8 +1,7 @@
 use crate::intcode::cpu::Instruction::*;
-use crate::intcode::IntcodeError::{LogicError, ParsingFailure, WriteToImmediate};
-use crate::intcode::State::{AwaitingInput, Continue, Halted, OutputGenerated};
-use crate::intcode::{IntcodeError, IntcodeResult, Resettable, Runnable, State};
-use std::collections::VecDeque;
+use crate::intcode::IntcodeError::{InputFailure, ParsingFailure, WriteToImmediate};
+use crate::intcode::IntcodeState::{AwaitingInput, Continue, Halted, OutputGenerated};
+use crate::intcode::{IntcodeError, IntcodeResult, IntcodeState, Resettable, Runnable};
 
 pub fn parse_code(code: &str) -> IntcodeResult<Vec<isize>> {
     code.split(',')
@@ -14,8 +13,7 @@ pub struct CPU {
     pub memory: Memory,
     pub instr_ptr: isize,
     pub rel_base: isize,
-    pub input_queue: VecDeque<isize>,
-    pub output_queue: VecDeque<isize>
+    pub input: Option<isize>
 }
 
 impl CPU {
@@ -23,10 +21,14 @@ impl CPU {
         let memory = Memory::new(program);
         let instr_ptr = 0;
         let rel_base = 0;
-        let input_queue = VecDeque::new();
-        let output_queue = VecDeque::new();
+        let input = None;
 
-        CPU { memory, instr_ptr, rel_base, input_queue, output_queue }
+        CPU { memory, instr_ptr, rel_base, input }
+    }
+
+    pub fn parse(code: &str) -> IntcodeResult<CPU> {
+        let program = parse_code(code)?;
+        Ok(CPU::new(program))
     }
 
     fn param(&self, i: usize) -> IntcodeResult<Parameter> {
@@ -111,30 +113,6 @@ impl CPU {
             Parameter::Relative(offset) => Ok(self.memory.set(self.rel_base + offset, value))
         }
     }
-
-
-
-    pub fn run(&mut self) -> IntcodeResult<State> {
-        loop {
-            let state = self.step()?;
-            if state == Halted || state == AwaitingInput {
-                return Ok(state)
-            }
-        }
-    }
-
-    pub fn run_until_output(&mut self) -> IntcodeResult<()> {
-        loop {
-            let state = self.step()?;
-            if state == Halted || state == AwaitingInput {
-                let msg = format!("Waiting for output, but found state {state:?}");
-                return Err(LogicError(msg))
-            }
-            else if state == OutputGenerated {
-                return Ok(())
-            }
-        }
-    }
 }
 
 impl Resettable for CPU {
@@ -142,8 +120,7 @@ impl Resettable for CPU {
         self.memory.reset();
         self.instr_ptr = 0;
         self.rel_base = 0;
-        self.input_queue.clear();
-        self.output_queue.clear();
+        self.input = None;
     }
 }
 
@@ -202,7 +179,17 @@ impl Memory {
 }
 
 impl Runnable for CPU {
-    fn step(&mut self) -> IntcodeResult<State> {
+    type Input = isize;
+    type Output = isize;
+
+    fn accept_input(&mut self, input: Self::Input) -> IntcodeResult<()> {
+        match self.input {
+            None => { self.input = Some(input); Ok(()) },
+            Some(_) => { Err(InputFailure) }
+        }
+    }
+
+    fn step(&mut self) -> IntcodeResult<IntcodeState<isize>> {
         match self.cur_instr()? {
             Add(p1, p2, p3) => {
                 let v1 = self.get(p1)?;
@@ -219,8 +206,9 @@ impl Runnable for CPU {
                 Ok(Continue)
             }
             Input(p1) => {
-                match self.input_queue.pop_front() {
+                match self.input {
                     Some(val) => {
+                        self.input = None;
                         self.set(p1, val)?;
                         self.instr_ptr += 2;
                         Ok(Continue)
@@ -230,9 +218,9 @@ impl Runnable for CPU {
             }
             Output(p1) => {
                 let v1 = self.get(p1)?;
-                self.output_queue.push_back(v1);
+
                 self.instr_ptr += 2;
-                Ok(OutputGenerated)
+                Ok(OutputGenerated(v1))
             }
             JumpIfTrue(p1, p2) => {
                 let v1 = self.get(p1)?;

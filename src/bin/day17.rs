@@ -1,6 +1,5 @@
-use adventofcode2019::intcode::io::{Bus, Last, OutputHandler};
 use adventofcode2019::intcode::IntcodeError::{ExpectedOutput, LogicError};
-use adventofcode2019::intcode::{IntcodeResult, Runnable, System};
+use adventofcode2019::intcode::{IOWrapper, IntcodeResult, IntcodeState, Runnable};
 use adventofcode2019::grid::Direction::{Down, Left, Right, Up};
 use adventofcode2019::grid::{Direction, Position};
 use adventofcode2019::build_main_res;
@@ -8,6 +7,9 @@ use itertools::{chain, Itertools};
 use std::cmp::min;
 use std::collections::{HashSet, VecDeque};
 use std::iter::once;
+use adventofcode2019::intcode::cpu::CPU;
+use adventofcode2019::intcode::IntcodeState::Continue;
+use adventofcode2019::intcode::io::{Bus, IProvider, Last, OProvider};
 
 struct Scene {
     scaffolds: HashSet<Position>,
@@ -45,11 +47,28 @@ impl SceneBuilder {
     }
 }
 
-impl OutputHandler for SceneBuilder {
-    fn push(&mut self, v: isize) -> IntcodeResult<()> {
-        let c = (v as u8) as char;
+impl IProvider for SceneBuilder {
+    type PInput = isize;
+    type RInput = ();
+
+    fn provide_input<O>(&mut self) -> IntcodeResult<(IntcodeState<O>, Option<isize>)> {
+        Err(LogicError("Didn't expect to be asked for any input".to_owned()))
+    }
+
+    fn receive_input(&mut self, input: Self::RInput) -> IntcodeResult<()> {
+        Err(LogicError(format!("Didn't expect to receive input; got {input:?}")))
+    }
+}
+
+impl OProvider for SceneBuilder {
+    type POutput = ();
+    type ROutput = isize;
+
+
+    fn handle_output(&mut self, output: Self::ROutput) -> IntcodeResult<IntcodeState<Self::POutput>> {
+        let c = (output as u8) as char;
         match c {
-            '#' | '^' | '>' | 'v' | '<' =>  { self.scaffolds.insert(Position(self.i, self.j)); },
+            '#' | '^' | '>' | 'v' | '<' => { self.scaffolds.insert(Position(self.i, self.j)); },
             _ => ()
         }
 
@@ -69,12 +88,11 @@ impl OutputHandler for SceneBuilder {
         if c == '\n' {
             self.i += 1;
             self.j = 0;
-        }
-        else {
+        } else {
             self.j += 1;
         }
 
-        Ok(())
+        Ok(Continue)
     }
 }
 
@@ -236,10 +254,11 @@ impl Scene {
 }
 
 fn part1(input: &str) -> IntcodeResult<usize> {
-    let io = Bus { input: (), output: SceneBuilder::new() };
-    let mut system = System::parse(input, io)?;
+    let io = SceneBuilder::new();
+    let cpu = CPU::parse(input)?;
+    let mut system = IOWrapper { outer: io, inner: cpu};
     system.run()?;
-    let scene = system.io.output.build()?;
+    let scene = system.outer.build()?;
 
     let intersections = scene.intersections();
 
@@ -251,10 +270,11 @@ fn part1(input: &str) -> IntcodeResult<usize> {
 }
 
 fn part2(input: &str) -> IntcodeResult<isize> {
-    let io = Bus { input: (), output: SceneBuilder::new() };
-    let mut system = System::parse(input, io)?;
+    let io = SceneBuilder::new();
+    let cpu = CPU::parse(input)?;
+    let mut system = IOWrapper { outer: io, inner: cpu};
     system.run()?;
-    let scene = system.io.output.build()?;
+    let scene = system.outer.build()?;
 
     let programs = scene.programs();
 
@@ -284,14 +304,14 @@ fn part2(input: &str) -> IntcodeResult<isize> {
     input_chars.push_back('\n');
 
     let output = Last(None);
-
     let io2 = Bus { input: input_chars, output };
 
-    let mut system2 = System::parse(input, io2)?;
-    system2.cpu.memory.set(0, 2);
+    let mut cpu2 = CPU::parse(input)?;
+    cpu2.memory.set(0, 2);
+    let mut system2 = IOWrapper { outer: io2, inner: cpu2 };
     system2.run()?;
 
-    system2.io.output.0.ok_or(ExpectedOutput)
+    system2.outer.output.0.ok_or(ExpectedOutput)
 }
 
 build_main_res!("day17.txt", "Part 1" => part1, "Part 2" => part2);

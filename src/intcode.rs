@@ -1,6 +1,5 @@
-use crate::intcode::cpu::{parse_code, CPU};
-use crate::intcode::io::IOProvider;
-use std::collections::VecDeque;
+use crate::intcode::IntcodeState::*;
+use crate::intcode::io::{IProvider, OProvider};
 
 pub mod io;
 pub mod cpu;
@@ -13,40 +12,52 @@ pub enum IntcodeError {
     WriteToImmediate,
     ParsingFailure(String),
     LogicError(String),
-    ExpectedOutput
+    ExpectedOutput,
+    InputFailure
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum State {
+pub enum IntcodeState<T> {
     Continue,
-    OutputGenerated,
+    OutputGenerated(T),
     Halted,
     AwaitingInput
 }
 
 pub type IntcodeResult<T> = Result<T, IntcodeError>;
 
-pub trait Runnable {
-    fn step(&mut self) -> IntcodeResult<State>;
+pub trait Runnable: Sized {
+    type Input;
+    type Output;
 
-    fn run(&mut self) -> IntcodeResult<State> {
+    fn accept_input(&mut self, input: Self::Input) -> IntcodeResult<()>;
+
+    fn step(&mut self) -> IntcodeResult<IntcodeState<Self::Output>>;
+
+    fn run(&mut self) -> IntcodeResult<IntcodeState<Self::Output>> {
         loop {
             let state = self.step()?;
 
-            if state == State::Halted || state == State::AwaitingInput {
-                return Ok(state);
+            match &state {
+                Halted | AwaitingInput => return Ok(state),
+                _ => continue
             }
         }
     }
 
-    fn run_until_output(&mut self) -> IntcodeResult<()> {
+    fn run_until_output(&mut self) -> IntcodeResult<Self::Output> {
         loop {
             match self.step()? {
-                State::OutputGenerated => return Ok(()),
-                State::AwaitingInput | State::Halted => return Err(IntcodeError::ExpectedOutput),
+                OutputGenerated(o) => return Ok(o),
+                AwaitingInput | IntcodeState::Halted => return Err(IntcodeError::ExpectedOutput),
                 _ => ()
             }
         }
+    }
+
+    fn wrap<IO>(self, io: IO) -> IOWrapper<IO, Self>
+    where IO: IProvider<PInput=Self::Input> + OProvider<ROutput=Self::Output> {
+        IOWrapper { outer: io, inner: self }
     }
 }
 
@@ -54,54 +65,42 @@ pub trait Resettable {
     fn reset(&mut self);
 }
 
-impl Resettable for VecDeque<isize> {
-    fn reset(&mut self) {
-        self.clear()
-    }
+pub struct IOWrapper<Outer, Inner> {
+    pub outer: Outer,
+    pub inner: Inner
 }
 
-pub struct System<T: IOProvider> {
-    pub cpu: CPU,
-    pub io: T,
-}
+impl<Outer, Inner> Runnable for IOWrapper<Outer, Inner>
+where Outer: IProvider + OProvider, Inner: Runnable<Input=Outer::PInput, Output=Outer::ROutput> {
+    type Input = Outer::RInput;
+    type Output = Outer::POutput;
 
-impl<T: IOProvider> System<T> {
-    pub fn new(program: Vec<isize>, io: T) -> System<T> {
-        let cpu = CPU::new(program);
-        System { cpu, io }
+    fn accept_input(&mut self, input: Self::Input) -> IntcodeResult<()> {
+        self.outer.receive_input(input)
     }
 
-    pub fn parse(code: &str, io: T) -> IntcodeResult<System<T>> {
-        parse_code(code).map(|program| System::new(program, io))
-    }
-}
-
-impl<T: IOProvider> Runnable for System<T> {
-    fn step(&mut self) -> IntcodeResult<State> {
-        match self.cpu.step()? {
-            State::OutputGenerated => {
-                while let Some(x) = self.cpu.output_queue.pop_front() {
-                    self.io.push(x)?;
-                }
-                Ok(State::OutputGenerated)
+    fn step(&mut self) -> IntcodeResult<IntcodeState<Self::Output>> {
+        match self.inner.step()? {
+            OutputGenerated(o) => {
+                self.outer.handle_output(o)
             },
-            State::AwaitingInput => {
-                match self.io.get()? {
-                    Some(x) => {
-                        self.cpu.input_queue.push_back(x);
-                        self.step()
-                    },
-                    None => { Ok(State::AwaitingInput) }
+            AwaitingInput => {
+                let (new_state, output) = self.outer.provide_input()?;
+                if let Some(o) = output {
+                    self.inner.accept_input(o)?;
                 }
+                Ok(new_state)
             },
-            other => Ok(other)
+            Halted => Ok(Halted),
+            Continue => Ok(Continue)
         }
     }
 }
 
-impl<T: IOProvider + Resettable> Resettable for System<T> {
+impl<Outer, Inner> Resettable for IOWrapper<Outer, Inner>
+where Outer: Resettable, Inner: Resettable {
     fn reset(&mut self) {
-        self.cpu.reset();
-        self.io.reset();
+        self.outer.reset();
+        self.inner.reset();
     }
 }

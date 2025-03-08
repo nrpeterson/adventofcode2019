@@ -1,39 +1,46 @@
 use adventofcode2019::build_main_res;
-use adventofcode2019::intcode::cpu::parse_code;
+use adventofcode2019::intcode::cpu::{parse_code, CPU};
 use adventofcode2019::intcode::io::IOQueues;
 use adventofcode2019::intcode::IntcodeError::LogicError;
-use adventofcode2019::intcode::State::Halted;
-use adventofcode2019::intcode::{IntcodeResult, Runnable, State, System};
+use adventofcode2019::intcode::IntcodeState::Halted;
+use adventofcode2019::intcode::{IOWrapper, IntcodeResult, Runnable};
 use itertools::Itertools;
+
+type System = IOWrapper<IOQueues, CPU>;
+
+fn init_thrusters(program: &Vec<isize>, phases: Vec<isize>) -> IntcodeResult<Vec<System>> {
+    phases.into_iter().map(|x| {
+        let io = IOQueues::new();
+        let cpu = CPU::new(program.clone());
+        let mut system = cpu.wrap(io);
+        system.accept_input(x)?;
+        Ok(system)
+    }).collect()
+}
 
 fn part1(input: &str) -> IntcodeResult<isize> {
     let ref program = parse_code(input)?;
 
-    let to_thrusters = |a: isize, b: isize, c: isize, d: isize, e: isize| -> IntcodeResult<isize> {
-        let mut systems = [a, b, c, d, e].map(|i| {
-            let mut system = System::new(program.clone(), IOQueues::new());
-            system.io.input.push_back(i);
-            system
-        });
-
-        systems[0].io.input.push_back(0);
+    let to_thrusters = |phases: Vec<isize>| -> IntcodeResult<isize> {
+        let mut systems = init_thrusters(program, phases)?;
+        systems[0].accept_input(0)?;
 
         for i in 0..4 {
             systems[i].run_until_output()?;
             let msg = format!("Expected an output for intcode {i}");
-            let output = systems[i].io.output
+            let output = systems[i].outer.output
                 .pop_front()
                 .ok_or(LogicError(msg))?;
 
-            systems[i+1].io.input.push_back(output);
+            systems[i+1].accept_input(output)?;
         }
 
         systems[4].run_until_output()?;
-        systems[4].io.output.pop_front().ok_or(LogicError("Expected an output".to_string()))
+        systems[4].outer.output.pop_front().ok_or(LogicError("Expected an output".to_string()))
     };
 
     let results = (0..5).permutations(5)
-        .map(|v| to_thrusters(v[0], v[1], v[2], v[3], v[4]))
+        .map(to_thrusters)
         .collect::<IntcodeResult<Vec<isize>>>()?;
 
     results.into_iter()
@@ -44,28 +51,23 @@ fn part1(input: &str) -> IntcodeResult<isize> {
 fn part2(input: &str) -> IntcodeResult<isize> {
     let ref program = parse_code(input)?;
 
-    let to_thrusters = |a: isize, b: isize, c: isize, d: isize, e: isize| -> IntcodeResult<isize> {
-        let mut cs = [a, b, c, d, e].map(|x| {
-            let mut computer = System::new(program.clone(), IOQueues::new());
-            computer.io.input.push_back(x);
-            computer
-        });
-
-        cs[0].io.input.push_back(0);
+    let to_thrusters = |phases: Vec<isize>| -> IntcodeResult<isize> {
+        let mut systems = init_thrusters(program, phases)?;
+        systems[0].accept_input(0)?;
 
         let mut last = 0;
 
         loop {
-            let steps = cs.iter_mut()
+            let steps = systems.iter_mut()
                 .map(|c| c.step())
-                .collect::<IntcodeResult<Vec<State>>>()?;
+                .collect::<IntcodeResult<Vec<_>>>()?;
 
             if steps.iter().all(|s| *s == Halted) { return Ok(last) };
 
             for i in 0..5 {
-                while let Some(o) = cs[i].io.output.pop_front() {
+                while let Some(o) = systems[i].outer.output.pop_front() {
                     let j = (i + 1) % 5;
-                    cs[j].io.input.push_back(o);
+                    systems[j].accept_input(o)?;
 
                     if i == 4 {
                         last = o;
@@ -76,7 +78,7 @@ fn part2(input: &str) -> IntcodeResult<isize> {
     };
 
     let results = (5..10).permutations(5)
-        .map(|v| to_thrusters(v[0], v[1], v[2], v[3], v[4]))
+        .map(to_thrusters)
         .collect::<IntcodeResult<Vec<isize>>>()?;
 
     results.into_iter()

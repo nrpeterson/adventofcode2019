@@ -1,14 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use itertools::{chain, repeat_n, Itertools};
-use nom::AsChar;
 use adventofcode2019::build_main;
 use adventofcode2019::grid::{Grid, Position};
-
-struct Graph {
-    edges: HashMap<Position, Vec<Position>>,
-    start: Position,
-    end: Position
-}
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 struct Node {

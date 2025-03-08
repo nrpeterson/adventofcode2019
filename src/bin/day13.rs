@@ -1,7 +1,10 @@
 use crate::GameObject::{Ball, Block, Empty, HorizontalPaddle, Wall};
 use adventofcode2019::build_main_res;
-use adventofcode2019::intcode::io::{InputProvider, OutputHandler};
-use adventofcode2019::intcode::{IntcodeResult, Runnable, System};
+use adventofcode2019::intcode::cpu::CPU;
+use adventofcode2019::intcode::io::{IProvider, OProvider};
+use adventofcode2019::intcode::IntcodeError::LogicError;
+use adventofcode2019::intcode::IntcodeState::Continue;
+use adventofcode2019::intcode::{IntcodeResult, IntcodeState, Runnable};
 use adventofcode2019::points::Point2D;
 use std::collections::HashMap;
 
@@ -46,15 +49,25 @@ impl ArcadeCabinet {
     }
 }
 
-impl InputProvider for ArcadeCabinet {
-    fn get(&mut self) -> IntcodeResult<Option<isize>> {
-        Ok(Some((self.ball.0 - self.paddle.0).signum()))
+impl IProvider for ArcadeCabinet {
+    type PInput = isize;
+    type RInput = isize;
+
+    fn provide_input<O>(&mut self) -> IntcodeResult<(IntcodeState<O>, Option<isize>)> {
+        Ok((Continue, Some((self.ball.0 - self.paddle.0).signum())))
+    }
+
+    fn receive_input(&mut self, input: isize) -> IntcodeResult<()> {
+        Err(LogicError(format!("Didn't expect to receive any input; received {input}")))
     }
 }
 
-impl OutputHandler for ArcadeCabinet {
-    fn push(&mut self, v: isize) -> IntcodeResult<()> {
-        self.output_cache.push(v);
+impl OProvider for ArcadeCabinet {
+    type POutput = isize;
+    type ROutput = isize;
+
+    fn handle_output(&mut self, output: isize) -> IntcodeResult<IntcodeState<isize>> {
+        self.output_cache.push(output);
 
         if self.output_cache.len() == 3 {
             let x = self.output_cache[0];
@@ -82,16 +95,17 @@ impl OutputHandler for ArcadeCabinet {
             self.output_cache.clear();
         }
 
-        Ok(())
+        Ok(Continue)
     }
 }
 
 fn part1(input: &str) -> IntcodeResult<usize> {
     let cabinet = ArcadeCabinet::new();
-    let mut system = System::parse(input, cabinet)?;
+    let cpu = CPU::parse(input)?;
+    let mut system = cpu.wrap(cabinet);
     system.run()?;
 
-    let result = system.io.screen.values()
+    let result = system.outer.screen.values()
         .filter(|&&v| v == Block)
         .count();
 
@@ -100,10 +114,11 @@ fn part1(input: &str) -> IntcodeResult<usize> {
 
 fn part2(input: &str) -> IntcodeResult<isize> {
     let cabinet = ArcadeCabinet::new();
-    let mut system = System::parse(input, cabinet)?;
-    system.cpu.memory.set(0, 2);
+    let mut cpu = CPU::parse(input)?;
+    cpu.memory.set(0, 2);
+    let mut system = cpu.wrap(cabinet);
     system.run()?;
-    Ok(system.io.score)
+    Ok(system.outer.score)
 }
 
 build_main_res!("day13.txt", "Part 1" => part1, "Part 2" => part2);
