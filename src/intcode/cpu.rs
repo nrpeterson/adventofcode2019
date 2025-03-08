@@ -3,6 +3,60 @@ use crate::intcode::IntcodeError::{InputFailure, ParsingFailure, WriteToImmediat
 use crate::intcode::IntcodeState::{AwaitingInput, Continue, Halted, OutputGenerated};
 use crate::intcode::{IntcodeError, IntcodeResult, IntcodeState, Resettable, Runnable};
 
+enum Instruction {
+    Add(Parameter, Parameter, Parameter),
+    Multiply(Parameter, Parameter, Parameter),
+    Input(Parameter),
+    Output(Parameter),
+    JumpIfTrue(Parameter, Parameter),
+    JumpIfFalse(Parameter, Parameter),
+    LessThan(Parameter, Parameter, Parameter),
+    Equal(Parameter, Parameter, Parameter),
+    RelativeBaseOffset(Parameter),
+    Done
+}
+
+enum Parameter {
+    Position(isize),
+    Immediate(isize),
+    Relative(isize)
+}
+
+pub struct Memory {
+    rom: Vec<isize>,
+    pub ram: Vec<isize>
+}
+
+impl Memory {
+    fn new(rom: Vec<isize>) -> Memory {
+        let ram = rom.clone();
+        Memory { rom, ram }
+    }
+
+    pub fn get(&self, address: isize) -> isize {
+        let i = address as usize;
+        if i >= self.ram.len() {
+            0
+        }
+        else {
+            self.ram[i]
+        }
+    }
+
+    pub fn set(&mut self, address: isize, value: isize) {
+        let i = address as usize;
+        if i >= self.ram.len() {
+            self.ram.resize(i + 1, 0);
+        }
+        self.ram[i] = value;
+    }
+
+    pub fn reset(&mut self) {
+        self.ram.clear();
+        self.ram.extend_from_slice(&self.rom);
+    }
+}
+
 pub fn parse_code(code: &str) -> IntcodeResult<Vec<isize>> {
     code.split(',')
         .map(|s| s.parse::<isize>().map_err(|e| ParsingFailure(e.to_string())))
@@ -121,60 +175,6 @@ impl Resettable for CPU {
         self.instr_ptr = 0;
         self.rel_base = 0;
         self.input = None;
-    }
-}
-
-enum Instruction {
-    Add(Parameter, Parameter, Parameter),
-    Multiply(Parameter, Parameter, Parameter),
-    Input(Parameter),
-    Output(Parameter),
-    JumpIfTrue(Parameter, Parameter),
-    JumpIfFalse(Parameter, Parameter),
-    LessThan(Parameter, Parameter, Parameter),
-    Equal(Parameter, Parameter, Parameter),
-    RelativeBaseOffset(Parameter),
-    Done
-}
-
-enum Parameter {
-    Position(isize),
-    Immediate(isize),
-    Relative(isize)
-}
-
-pub struct Memory {
-    rom: Vec<isize>,
-    pub ram: Vec<isize>
-}
-
-impl Memory {
-    fn new(rom: Vec<isize>) -> Memory {
-        let ram = rom.clone();
-        Memory { rom, ram }
-    }
-
-    pub fn get(&self, address: isize) -> isize {
-        let i = address as usize;
-        if i >= self.ram.len() {
-            0
-        }
-        else {
-            self.ram[i]
-        }
-    }
-
-    pub fn set(&mut self, address: isize, value: isize) {
-        let i = address as usize;
-        if i >= self.ram.len() {
-            self.ram.resize(i + 1, 0);
-        }
-        self.ram[i] = value;
-    }
-
-    pub fn reset(&mut self) {
-        self.ram.clear();
-        self.ram.extend_from_slice(&self.rom);
     }
 }
 
